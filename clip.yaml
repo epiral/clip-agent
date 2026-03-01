@@ -1,0 +1,7 @@
+name: agent
+description: Epiral Agent — 全 Clip 型本地闭环 AI 对话系统
+version: 0.1.0
+
+schedules:
+  - command: event-check
+    cron: "* * * * *"   # 每分钟扫描到期事件
