@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@import "@fontsource/playfair-display/400.css";
+@import "@fontsource/playfair-display/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+
+/* 报纸/社论风格 Design Tokens */
+@theme {
+  --font-display: "Playfair Display", serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --radius: 0;
+
+  /* Light mode（默认） */
+  --color-background: oklch(0.98 0.004 90);
+  --color-foreground: oklch(0.12 0 0);
+  --color-card: oklch(0.96 0.003 90);
+  --color-card-foreground: oklch(0.12 0 0);
+  --color-primary: oklch(0.25 0 0);
+  --color-primary-foreground: oklch(0.98 0.004 90);
+  --color-secondary: oklch(0.94 0.003 90);
+  --color-secondary-foreground: oklch(0.20 0 0);
+  --color-muted: oklch(0.94 0.003 90);
+  --color-muted-foreground: oklch(0.45 0 0);
+  --color-accent: oklch(0.55 0.18 25);
+  --color-accent-foreground: oklch(0.98 0 0);
+  --color-border: oklch(0.88 0 0);
+  --color-input: oklch(0.88 0 0);
+  --color-ring: oklch(0.55 0.18 25);
+
+  --color-sidebar: oklch(0.96 0.003 90);
+  --color-sidebar-foreground: oklch(0.12 0 0);
+  --color-sidebar-border: oklch(0.88 0 0);
+  --color-sidebar-accent: oklch(0.92 0.003 90);
+  --color-sidebar-accent-foreground: oklch(0.12 0 0);
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: oklch(0.12 0 0);
+    --color-foreground: oklch(0.92 0.004 90);
+    --color-card: oklch(0.16 0 0);
+    --color-card-foreground: oklch(0.92 0.004 90);
+    --color-primary: oklch(0.92 0.004 90);
+    --color-primary-foreground: oklch(0.12 0 0);
+    --color-secondary: oklch(0.18 0 0);
+    --color-secondary-foreground: oklch(0.88 0 0);
+    --color-muted: oklch(0.20 0 0);
+    --color-muted-foreground: oklch(0.60 0 0);
+    --color-accent: oklch(0.60 0.20 25);
+    --color-accent-foreground: oklch(0.98 0 0);
+    --color-border: oklch(0.25 0 0);
+    --color-input: oklch(0.25 0 0);
+    --color-ring: oklch(0.60 0.20 25);
+
+    --color-sidebar: oklch(0.14 0 0);
+    --color-sidebar-foreground: oklch(0.92 0.004 90);
+    --color-sidebar-border: oklch(0.25 0 0);
+    --color-sidebar-accent: oklch(0.18 0 0);
+    --color-sidebar-accent-foreground: oklch(0.92 0.004 90);
+  }
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
