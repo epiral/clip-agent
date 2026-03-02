@@ -23,6 +23,10 @@ var commandNames = []string{
 	"get-runs",
 	"send-message",
 	"event-check",
+	// Pinix host protocol
+	"list-runs",
+	"get-run",
+	"send",
 }
 
 func main() {
@@ -58,6 +62,13 @@ func main() {
 		cmdSendMessage(db)
 	case "event-check":
 		cmdEventCheck()
+	// Pinix host protocol commands
+	case "list-runs":
+		cmdHostListRuns(db)
+	case "get-run":
+		cmdHostGetRun(db)
+	case "send":
+		cmdHostSend(db)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", subCmd)
 		os.Exit(1)
@@ -258,6 +269,10 @@ func cmdListTopics(db *sql.DB) {
 		}
 		topics = append(topics, t)
 	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterate topics: %v\n", err)
+		os.Exit(1)
+	}
 
 	if topics == nil {
 		topics = []topicItem{}
@@ -311,6 +326,10 @@ func cmdGetRuns(db *sql.DB) {
 		}
 		runs = append(runs, r)
 	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterate runs: %v\n", err)
+		os.Exit(1)
+	}
 
 	if runs == nil {
 		runs = []runItem{}
@@ -343,40 +362,250 @@ func cmdSendMessage(db *sql.DB) {
 		os.Exit(1)
 	}
 
-	// 获取 API key
+	cmdSendCore(db, input.TopicID, input.Message, "")
+}
+
+// ---------- event-check ----------
+
+func cmdEventCheck() {
+	fmt.Println("no events")
+}
+
+// ========== Pinix Host Protocol ==========
+// The Pinix desktop host UI calls: list-runs, get-run, send
+// These adapt the topic/run model to the host's flat conversation model.
+
+// ---------- list-runs (host) ----------
+// Returns latest run from each topic as a sidebar entry.
+
+type hostRunItem struct {
+	ID        string `json:"id"`
+	Trigger   string `json:"trigger"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func cmdHostListRuns(db *sql.DB) {
+	// Get the latest run per topic (each topic = one sidebar conversation)
+	rows, err := db.Query(`
+		SELECT r.id, r.created_at
+		FROM runs r
+		INNER JOIN (
+			SELECT topic_id, MAX(created_at) as max_created
+			FROM runs
+			GROUP BY topic_id
+		) latest ON r.topic_id = latest.topic_id AND r.created_at = latest.max_created
+		ORDER BY r.created_at DESC
+	`)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query runs: %v\n", err)
+		os.Exit(1)
+	}
+	defer rows.Close()
+
+	var items []hostRunItem
+	for rows.Next() {
+		var item hostRunItem
+		if err := rows.Scan(&item.ID, &item.CreatedAt); err != nil {
+			fmt.Fprintf(os.Stderr, "scan run: %v\n", err)
+			os.Exit(1)
+		}
+		item.Trigger = "chat"
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterate runs: %v\n", err)
+		os.Exit(1)
+	}
+
+	if items == nil {
+		items = []hostRunItem{}
+	}
+	writeJSON(items)
+}
+
+// ---------- get-run (host) ----------
+// Given a run ID, find its topic and return all messages in order.
+
+type hostGetRunInput struct {
+	ID string `json:"id"`
+}
+
+type hostMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type hostGetRunOutput struct {
+	Messages []hostMessage `json:"messages"`
+}
+
+func cmdHostGetRun(db *sql.DB) {
+	data, err := readStdin()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read stdin: %v\n", err)
+		os.Exit(1)
+	}
+
+	var input hostGetRunInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		fmt.Fprintf(os.Stderr, "parse json: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find topic_id from the run
+	var topicID string
+	err = db.QueryRow("SELECT topic_id FROM runs WHERE id = ?", input.ID).Scan(&topicID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "find run: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get all runs in this topic, ordered by creation time
+	rows, err := db.Query(
+		"SELECT user_message, messages, summary, status FROM runs WHERE topic_id = ? ORDER BY created_at ASC",
+		topicID,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query runs: %v\n", err)
+		os.Exit(1)
+	}
+	defer rows.Close()
+
+	var allMessages []hostMessage
+	for rows.Next() {
+		var userMsg, msgsJSON, summary *string
+		var status string
+		if err := rows.Scan(&userMsg, &msgsJSON, &summary, &status); err != nil {
+			continue
+		}
+		// Try to parse stored messages first
+		if msgsJSON != nil && *msgsJSON != "" {
+			var msgs []hostMessage
+			if json.Unmarshal([]byte(*msgsJSON), &msgs) == nil {
+				allMessages = append(allMessages, msgs...)
+				continue
+			}
+		}
+		// Fallback: reconstruct from user_message + summary
+		if userMsg != nil {
+			allMessages = append(allMessages, hostMessage{Role: "user", Content: *userMsg})
+		}
+		if summary != nil && status == "completed" {
+			allMessages = append(allMessages, hostMessage{Role: "assistant", Content: *summary})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterate runs: %v\n", err)
+		os.Exit(1)
+	}
+
+	writeJSON(hostGetRunOutput{Messages: allMessages})
+}
+
+// ---------- send (host) ----------
+// Creates a run, streams LLM response, appends RUN_ID:<id> at end.
+
+type hostSendInput struct {
+	Message   string `json:"message"`
+	PrevRunID string `json:"prev_run_id"`
+	Trigger   string `json:"trigger"`
+}
+
+func cmdHostSend(db *sql.DB) {
+	data, err := readStdin()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read stdin: %v\n", err)
+		os.Exit(1)
+	}
+
+	var input hostSendInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		fmt.Fprintf(os.Stderr, "parse json: %v\n", err)
+		os.Exit(1)
+	}
+
+	if input.Message == "" {
+		fmt.Fprintln(os.Stderr, "message is required")
+		os.Exit(1)
+	}
+
+	// Determine topic: find from prev_run_id or create new
+	var topicID string
+	if input.PrevRunID != "" {
+		err = db.QueryRow("SELECT topic_id FROM runs WHERE id = ?", input.PrevRunID).Scan(&topicID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "find prev run topic: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Create new topic (auto-named from first few chars of message)
+		topicID = newUUID()
+		now := nowUnix()
+		topicName := string([]rune(input.Message)[:min(len([]rune(input.Message)), 30)])
+		_, err = db.Exec(
+			"INSERT INTO topics (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+			topicID, topicName, now, now,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create topic: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Reuse send-message logic with the resolved topicID
+	// Set up as sendMessageInput and call the core logic
+	runID := cmdSendCore(db, topicID, input.Message, input.PrevRunID)
+
+	// Append RUN_ID marker for host UI
+	os.Stdout.WriteString("RUN_ID:" + runID)
+}
+
+// cmdSendCore is the shared send logic used by both send-message and send (host).
+// Returns the run ID.
+func cmdSendCore(db *sql.DB, topicID, message, prevRunIDStr string) string {
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		// Fallback: read from pinix secrets
+		home, _ := os.UserHomeDir()
+		if data, err := os.ReadFile(filepath.Join(home, ".config", "pinix", "secrets", "openrouter-api-key")); err == nil {
+			apiKey = strings.TrimSpace(string(data))
+		}
+	}
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "OPENROUTER_API_KEY not set")
 		os.Exit(1)
 	}
 
-	// 查找上一条 run（最新的）
 	var prevRunID *string
-	err = db.QueryRow(
-		"SELECT id FROM runs WHERE topic_id = ? ORDER BY created_at DESC LIMIT 1",
-		input.TopicID,
-	).Scan(&prevRunID)
-	if err != nil && err != sql.ErrNoRows {
-		fmt.Fprintf(os.Stderr, "query prev run: %v\n", err)
-		os.Exit(1)
+	if prevRunIDStr != "" {
+		prevRunID = &prevRunIDStr
+	} else {
+		// Find latest run in topic
+		var latest string
+		err := db.QueryRow(
+			"SELECT id FROM runs WHERE topic_id = ? ORDER BY created_at DESC LIMIT 1",
+			topicID,
+		).Scan(&latest)
+		if err == nil {
+			prevRunID = &latest
+		}
 	}
 
-	// 创建 run
 	runID := newUUID()
 	now := nowUnix()
-	_, err = db.Exec(
+	_, err := db.Exec(
 		"INSERT INTO runs (id, topic_id, prev_run_id, user_message, status, started_at, created_at) VALUES (?, ?, ?, ?, 'in_progress', ?, ?)",
-		runID, input.TopicID, prevRunID, input.Message, now, now,
+		runID, topicID, prevRunID, message, now, now,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "insert run: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 构建历史上下文：最近 10 条 completed runs 的 summary
+	// Build history context
 	rows, err := db.Query(
 		"SELECT user_message, summary FROM runs WHERE topic_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 10",
-		input.TopicID,
+		topicID,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "query history: %v\n", err)
@@ -400,7 +629,7 @@ func cmdSendMessage(db *sql.DB) {
 		historyParts = append(historyParts, part)
 	}
 
-	// 反转历史（从旧到新）
+	// Reverse (oldest first)
 	for i, j := 0, len(historyParts)-1; i < j; i, j = i+1, j-1 {
 		historyParts[i], historyParts[j] = historyParts[j], historyParts[i]
 	}
@@ -410,10 +639,9 @@ func cmdSendMessage(db *sql.DB) {
 		systemPrompt += "\n\n以下是之前的对话摘要：\n" + strings.Join(historyParts, "\n---\n")
 	}
 
-	// 构建 OpenRouter 请求
 	messages := []map[string]string{
 		{"role": "system", "content": systemPrompt},
-		{"role": "user", "content": input.Message},
+		{"role": "user", "content": message},
 	}
 
 	reqBody := map[string]any{
@@ -445,10 +673,9 @@ func cmdSendMessage(db *sql.DB) {
 		os.Exit(1)
 	}
 
-	// 流式读取 SSE
+	// Stream SSE
 	var fullResponse strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
-	// 增大 buffer 以处理大 chunk
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
@@ -475,12 +702,17 @@ func cmdSendMessage(db *sql.DB) {
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 			content := chunk.Choices[0].Delta.Content
 			fullResponse.WriteString(content)
-			// 实时输出到 stdout
 			os.Stdout.WriteString(content)
 		}
 	}
 
-	// 生成 summary（取前 200 字）
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "\nstream read error: %v\n", err)
+		db.Exec("UPDATE runs SET status = 'failed', ended_at = ? WHERE id = ?", nowUnix(), runID)
+		os.Exit(1)
+	}
+
+	// Save
 	responseText := fullResponse.String()
 	summary := responseText
 	summaryRunes := []rune(summary)
@@ -488,14 +720,12 @@ func cmdSendMessage(db *sql.DB) {
 		summary = string(summaryRunes[:200]) + "..."
 	}
 
-	// 保存 messages 为 JSON
 	savedMessages := []map[string]string{
-		{"role": "user", "content": input.Message},
+		{"role": "user", "content": message},
 		{"role": "assistant", "content": responseText},
 	}
 	messagesJSON, _ := json.Marshal(savedMessages)
 
-	// 更新 run
 	endedAt := nowUnix()
 	_, err = db.Exec(
 		"UPDATE runs SET status = 'completed', messages = ?, summary = ?, ended_at = ? WHERE id = ?",
@@ -505,10 +735,6 @@ func cmdSendMessage(db *sql.DB) {
 		fmt.Fprintf(os.Stderr, "\nupdate run: %v\n", err)
 		os.Exit(1)
 	}
-}
 
-// ---------- event-check ----------
-
-func cmdEventCheck() {
-	fmt.Println("no events")
+	return runID
 }

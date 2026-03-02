@@ -6,14 +6,18 @@ export function TopicList({ topics, currentTopicId, onSelectTopic, onNewTopic })
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const inputRef = useRef(null)
+  const submittedRef = useRef(false)
 
   useEffect(() => {
     if (creating && inputRef.current) {
       inputRef.current.focus()
+      submittedRef.current = false
     }
   }, [creating])
 
   const handleSubmit = async () => {
+    if (submittedRef.current) return
+    submittedRef.current = true
     const trimmed = name.trim()
     if (trimmed) {
       await onNewTopic(trimmed)

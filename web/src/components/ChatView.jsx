@@ -3,7 +3,7 @@ import { Send } from 'lucide-react'
 import { MessageList } from './MessageList'
 import { toTitleCase } from '../lib/utils'
 
-export function ChatView({ topic, runs, isSending, onSend }) {
+export function ChatView({ topic, runs, isSending, error, onSend }) {
   const [input, setInput] = useState('')
 
   const handleSubmit = (e) => {
@@ -24,6 +24,13 @@ export function ChatView({ topic, runs, isSending, onSend }) {
       {/* 消息列表 */}
       <MessageList runs={runs} />
 
+      {/* 错误提示 */}
+      {error && (
+        <div className="px-6 py-2 text-sm text-accent border-t border-border bg-secondary">
+          {error}
+        </div>
+      )}
+
       {/* 输入区 */}
       <div className="border-t border-border px-6 py-3">
         <form onSubmit={handleSubmit} className="flex gap-2">
@@ -42,7 +49,7 @@ export function ChatView({ topic, runs, isSending, onSend }) {
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity duration-150 disabled:opacity-50"
           >
             {isSending ? (
-              '...'
+              <span className="inline-block w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
             ) : (
               <>
                 <Send className="w-4 h-4" />
