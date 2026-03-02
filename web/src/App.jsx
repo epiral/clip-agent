@@ -13,9 +13,10 @@ export default function App() {
   const loadTopics = useCallback(async () => {
     try {
       const result = await pinixInvoke('list-topics')
-      const stdout = result.stdout || result
-      const data = JSON.parse(typeof stdout === 'string' ? stdout : JSON.stringify(stdout))
-      setTopics(data)
+      const stdout = result.stdout ?? result
+      const raw = typeof stdout === 'string' ? stdout : JSON.stringify(stdout)
+      const data = JSON.parse(raw)
+      setTopics(Array.isArray(data) ? data : [])
     } catch (e) {
       console.error('loadTopics:', e)
       setTopics([])
@@ -28,9 +29,10 @@ export default function App() {
     if (!id) return
     try {
       const result = await pinixInvoke('get-runs', JSON.stringify({ topic_id: id }))
-      const stdout = result.stdout || result
-      const data = JSON.parse(typeof stdout === 'string' ? stdout : JSON.stringify(stdout))
-      setRuns(data)
+      const stdout = result.stdout ?? result
+      const raw = typeof stdout === 'string' ? stdout : JSON.stringify(stdout)
+      const data = JSON.parse(raw)
+      setRuns(Array.isArray(data) ? data : [])
     } catch (e) {
       console.error('loadRuns:', e)
       setRuns([])
@@ -48,9 +50,10 @@ export default function App() {
     setRuns([])
     try {
       const result = await pinixInvoke('get-runs', JSON.stringify({ topic_id: topicId }))
-      const stdout = result.stdout || result
-      const data = JSON.parse(typeof stdout === 'string' ? stdout : JSON.stringify(stdout))
-      setRuns(data)
+      const stdout = result.stdout ?? result
+      const raw = typeof stdout === 'string' ? stdout : JSON.stringify(stdout)
+      const data = JSON.parse(raw)
+      setRuns(Array.isArray(data) ? data : [])
     } catch (e) {
       console.error('loadRuns:', e)
       setRuns([])
