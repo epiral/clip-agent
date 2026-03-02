@@ -5,3 +5,4 @@ version: 0.1.0
 schedules:
   - command: event-check
     cron: "* * * * *"   # 每分钟扫描到期事件
+hasWeb: true
