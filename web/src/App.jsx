@@ -61,8 +61,7 @@ export default function App() {
   }, [])
 
   // 新建话题
-  const handleNewTopic = useCallback(async () => {
-    const name = prompt('话题名称：')
+  const handleNewTopic = useCallback(async (name) => {
     if (!name) return
     try {
       const result = await pinixInvoke('create-topic', JSON.stringify({ name }))

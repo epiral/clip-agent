@@ -1,17 +1,54 @@
+import { useState, useRef, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import { cn, toTitleCase } from '../lib/utils'
 
 export function TopicList({ topics, currentTopicId, onSelectTopic, onNewTopic }) {
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (creating && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [creating])
+
+  const handleSubmit = async () => {
+    const trimmed = name.trim()
+    if (trimmed) {
+      await onNewTopic(trimmed)
+    }
+    setCreating(false)
+    setName('')
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') handleSubmit()
+    if (e.key === 'Escape') { setCreating(false); setName('') }
+  }
+
   return (
     <aside className="w-56 shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground">
       <div className="p-3 border-b border-sidebar-border">
-        <button
-          onClick={onNewTopic}
-          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity duration-150"
-        >
-          <Plus className="w-4 h-4" />
-          New Topic
-        </button>
+        {creating ? (
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleSubmit}
+            placeholder="话题名称..."
+            className="w-full px-2 py-1.5 text-sm border border-input bg-background text-foreground outline-none focus:border-foreground transition-colors"
+          />
+        ) : (
+          <button
+            onClick={() => setCreating(true)}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity duration-150"
+          >
+            <Plus className="w-4 h-4" />
+            New Topic
+          </button>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto">
         {topics.length === 0 ? (
@@ -26,7 +63,6 @@ export function TopicList({ topics, currentTopicId, onSelectTopic, onNewTopic })
                 t.id === currentTopicId && 'bg-sidebar-accent font-medium !border-l-accent text-sidebar-accent-foreground'
               )}
             >
-              {/* Status dot: selected=accent, default=muted, offline=border-only */}
               <span className={cn(
                 'w-1.5 h-1.5 rounded-full shrink-0',
                 t.id === currentTopicId ? 'bg-accent' : 'bg-muted-foreground'
